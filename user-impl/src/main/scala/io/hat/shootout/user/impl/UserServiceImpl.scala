@@ -16,7 +16,10 @@ class UserServiceImpl(clusterSharding: ClusterSharding, persistentEntityRegistry
 
   override def login: ServiceCall[LoginRequest, LoginResponse] = ServiceCall { loginRequest =>
     //Dummy impl
-    val claims: java.util.Map[String, Object] = Map("email" -> loginRequest.email).asJava.asInstanceOf[java.util.Map[String, Object]]
+    val claims: java.util.Map[String, Object] = Map(
+      "sub" -> loginRequest.email,
+      "email" -> loginRequest.email
+    ).asJava.asInstanceOf[java.util.Map[String, Object]]
     val jwtToken = generator.generate(claims)
     Future.successful(LoginResponse(jwtToken))
   }

@@ -10,8 +10,10 @@ import akka.util.Timeout
 import com.lightbend.lagom.scaladsl.api.ServiceCall
 import com.lightbend.lagom.scaladsl.persistence.{EventStreamElement, PersistentEntityRegistry}
 import com.lightbend.lagom.scaladsl.server.ServerServiceCall
-import io.hat.shootout.api.{AcceptedMessage, ConfirmationMessage, GameMessage, GameService, RejectedMessage}
+import io.hat.shootout.api._
+import org.pac4j.core.authorization.authorizer.IsAuthenticatedAuthorizer.isAuthenticated
 import org.pac4j.core.config.Config
+import org.pac4j.core.profile.CommonProfile
 import org.pac4j.lagom.scaladsl.SecuredService
 import org.slf4j.{Logger, LoggerFactory}
 
@@ -38,23 +40,21 @@ class GameServiceImpl(clusterSharding: ClusterSharding, persistentEntityRegistry
   }
 
   /**
-   * curl -X POST -s 'http://localhost:9000/api/game?name=wild-west' | jq .
+   * curl -X POST -s 'http://localhost:9000/api/game?name=wild-west' -H "Authorization: Bearer $SHOOTOUT_JWT" | jq .
    */
   override def createGame(name: String): ServiceCall[NotUsed, GameMessage] = {
-    authenticate { profile =>
-
-      ServerServiceCall { _ =>
+    authorize(isAuthenticated[CommonProfile](), (profile: CommonProfile) =>
+      ServerServiceCall { _: NotUsed =>
+        val ownerId = profile.getId
         val gameId = UUID.randomUUID().toString
+
         val game = entityRef(gameId)
 
-        val ownerId = profile.getEmail
-
-        log.info(profile.toString)
+        log.info("[{}] Creating new game [{}]", gameId, profile.toString)
 
         (game ? (self => CreateGame(gameId, name, ownerId, self)))
           .map(response => GameMessage(response.id, response.name, response.owner, response.status, response.players))
-      }
-    }
+      })
   }
 
   /**
@@ -76,7 +76,7 @@ class GameServiceImpl(clusterSharding: ClusterSharding, persistentEntityRegistry
     val game = entityRef(gameId)
 
     val gameResponse = attribute match {
-      case "status" => (game ? (self => ChangeStatus(value, self)))
+      case "status" => game ? (self => ChangeStatus(value, self))
       case _ => Future.successful(Rejected(s"[$gameId] Unknown game attribute [$attribute]"))
     }
 
