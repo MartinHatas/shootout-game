@@ -9,14 +9,17 @@ import akka.stream.scaladsl.Source
 import akka.util.Timeout
 import com.lightbend.lagom.scaladsl.api.ServiceCall
 import com.lightbend.lagom.scaladsl.persistence.{EventStreamElement, PersistentEntityRegistry}
+import com.lightbend.lagom.scaladsl.server.ServerServiceCall
 import io.hat.shootout.api.{AcceptedMessage, ConfirmationMessage, GameMessage, GameService, RejectedMessage}
+import org.pac4j.core.config.Config
+import org.pac4j.lagom.scaladsl.SecuredService
 import org.slf4j.{Logger, LoggerFactory}
 
 import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Future}
 
 
-class GameServiceImpl(clusterSharding: ClusterSharding, persistentEntityRegistry: PersistentEntityRegistry)(implicit ec: ExecutionContext) extends GameService {
+class GameServiceImpl(clusterSharding: ClusterSharding, persistentEntityRegistry: PersistentEntityRegistry, override val securityConfig: Config)(implicit ec: ExecutionContext) extends GameService with SecuredService {
 
   private final val log: Logger = LoggerFactory.getLogger(classOf[GameServiceImpl])
 
@@ -35,17 +38,23 @@ class GameServiceImpl(clusterSharding: ClusterSharding, persistentEntityRegistry
   }
 
   /**
-   * curl -X POST -s http://localhost:9000/api/game?name=wild-west | jq .
+   * curl -X POST -s 'http://localhost:9000/api/game?name=wild-west' | jq .
    */
-  override def createGame(name: String): ServiceCall[NotUsed, GameMessage] = ServiceCall { _ =>
-    val gameId = UUID.randomUUID().toString
-    val game = entityRef(gameId)
+  override def createGame(name: String): ServiceCall[NotUsed, GameMessage] = {
+    authenticate { profile =>
 
-    //TODO: get owner id from session
-    val ownerId = "27"
+      ServerServiceCall { _ =>
+        val gameId = UUID.randomUUID().toString
+        val game = entityRef(gameId)
 
-    (game ? (self => CreateGame(gameId, name, ownerId, self)))
-      .map(response => GameMessage(response.id, response.name, response.owner, response.status, response.players))
+        val ownerId = profile.getEmail
+
+        log.info(profile.toString)
+
+        (game ? (self => CreateGame(gameId, name, ownerId, self)))
+          .map(response => GameMessage(response.id, response.name, response.owner, response.status, response.players))
+      }
+    }
   }
 
   /**

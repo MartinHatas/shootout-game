@@ -31,7 +31,6 @@ lazy val `user-impl` = (project in file("user-impl"))
       lagomScaladslKafkaBroker,
       lagomScaladslTestKit,
       lagomPac4j,
-      pac4jHttp,
       pac4jJwt,
       macwire,
       scalaTest
@@ -55,6 +54,9 @@ lazy val `shootout-impl` = (project in file("shootout-impl"))
       lagomScaladslPersistenceCassandra,
       lagomScaladslKafkaBroker,
       lagomScaladslTestKit,
+      lagomPac4j,
+      pac4jJwt,
+      pac4jHttp,
       macwire,
       scalaTest
     )

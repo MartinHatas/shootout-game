@@ -1,7 +1,9 @@
 package io.hat.shootout.impl
 
+import java.util
+
 import akka.cluster.sharding.typed.scaladsl.Entity
-import com.lightbend.lagom.scaladsl.api.ServiceLocator
+import com.lightbend.lagom.scaladsl.api.{Descriptor, ServiceLocator}
 import com.lightbend.lagom.scaladsl.api.ServiceLocator.NoServiceLocator
 import com.lightbend.lagom.scaladsl.persistence.cassandra.CassandraPersistenceComponents
 import com.lightbend.lagom.scaladsl.server._
@@ -10,6 +12,12 @@ import play.api.libs.ws.ahc.AhcWSComponents
 import com.lightbend.lagom.scaladsl.broker.kafka.LagomKafkaComponents
 import com.lightbend.lagom.scaladsl.playjson.JsonSerializerRegistry
 import com.softwaremill.macwire._
+import org.pac4j.core.config.Config
+import org.pac4j.core.context.WebContext
+import org.pac4j.core.context.HttpConstants.{AUTHORIZATION_HEADER, BEARER_HEADER_PREFIX}
+import org.pac4j.core.profile.CommonProfile
+import org.pac4j.http.client.direct.HeaderClient
+import org.pac4j.lagom.jwt.JwtAuthenticatorHelper
 import io.hat.shootout.api.GameService
 
 class GameAppLoader extends LagomApplicationLoader {
@@ -22,7 +30,7 @@ class GameAppLoader extends LagomApplicationLoader {
   override def loadDevMode(context: LagomApplicationContext): LagomApplication =
     new GameApplication(context) with LagomDevModeComponents
 
-  override def describeService = Some(readDescriptor[GameService])
+  override def describeService: Some[Descriptor] = Some(readDescriptor[GameService])
 }
 
 abstract class GameApplication(context: LagomApplicationContext)
@@ -44,5 +52,26 @@ abstract class GameApplication(context: LagomApplicationContext)
       entityContext => GameBehavior.create(entityContext)
     )
   )
+
+  lazy val jwtClient: HeaderClient = {
+    val headerClient = new HeaderClient
+    headerClient.setHeaderName(AUTHORIZATION_HEADER)
+    headerClient.setPrefixHeader(BEARER_HEADER_PREFIX)
+    headerClient.setAuthenticator(JwtAuthenticatorHelper.parse(config.getConfig("pac4j.lagom.jwt.authenticator")))
+    headerClient.setAuthorizationGenerator((_: WebContext, profile: CommonProfile) => {
+      if (profile.containsAttribute("roles")) {
+        profile.addRoles(profile.getAttribute("roles", classOf[util.Collection[String]]))
+      }
+      profile
+    })
+    headerClient.setName("JWT")
+    headerClient
+  }
+
+  lazy val securityConfig: Config = {
+    val config = new Config(jwtClient)
+    config.getClients.setDefaultSecurityClients(jwtClient.getName)
+    config
+  }
 
 }
