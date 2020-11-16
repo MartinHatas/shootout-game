@@ -18,7 +18,7 @@ trait GameService extends Service {
   def getGame(id: String): ServiceCall[NotUsed, GameMessage]
 
   /**
-    * curl -X POST -s 'http://localhost:9000/api/game?name=wild-west' | jq .
+    * curl -X POST -s 'http://localhost:9000/api/game?name=wild-west' -H "Authorization: Bearer $SHOOTOUT_JWT" | jq .
     */
   def createGame(name: String): ServiceCall[NotUsed, GameMessage]
 
@@ -28,7 +28,7 @@ trait GameService extends Service {
   def gameStream(id: String): ServiceCall[NotUsed, Source[String, NotUsed]]
 
   /**
-   * curl -X PATCH 'http://localhost:9000/api/game/19f0c829-17ff-401d-9c5f-ffc661302dfa/status?value=active'
+   * curl -X PATCH 'http://localhost:9000/api/game/19f0c829-17ff-401d-9c5f-ffc661302dfa/status?value=active' -H "Authorization: Bearer $SHOOTOUT_JWT"  | jq .
    */
   def updateGame(id: String, attribute: String, value: String): ServiceCall[NotUsed, ConfirmationMessage]
 

@@ -69,22 +69,21 @@ class GameServiceImpl(clusterSharding: ClusterSharding, persistentEntityRegistry
   }
 
   /**
-   * curl -X PATCH 'http://localhost:9000/api/game/19f0c829-17ff-401d-9c5f-ffc661302dfa/status?value=active'
+   * curl -X PATCH 'http://localhost:9000/api/game/19f0c829-17ff-401d-9c5f-ffc661302dfa/status?value=active' -H "Authorization: Bearer $SHOOTOUT_JWT" | jq .
    */
   override def updateGame(gameId: String, attribute: String, value: String): ServiceCall[NotUsed, ConfirmationMessage] = ServiceCall { _ =>
 
     val game = entityRef(gameId)
 
-    val gameResponse = attribute match {
-      case "status" => game ? (self => ChangeStatus(value, self))
+    val gameResponse: Future[Confirmation] = attribute match {
+//      case "status" => game ? (self => ChangeStatus(gameId, value, self))
       case _ => Future.successful(Rejected(s"[$gameId] Unknown game attribute [$attribute]"))
     }
 
     gameResponse map {
-      case Accepted         => AcceptedMessage
+      case Accepted      => AcceptedMessage
       case Rejected(reason) => RejectedMessage(reason)
     }
-
 
   }
 
