@@ -1,13 +1,16 @@
 package io.hat.shootout.impl
 
+import akka.Done
 import akka.actor.typed.{ActorRef, Behavior}
 import akka.cluster.sharding.typed.scaladsl._
+import akka.pattern.StatusReply
 import akka.persistence.typed.PersistenceId
 import akka.persistence.typed.scaladsl.{Effect, EventSourcedBehavior, ReplyEffect}
-import com.lightbend.lagom.scaladsl.api.transport.{BadRequest, NotFound}
+import com.lightbend.lagom.scaladsl.api.transport.BadRequest
 import com.lightbend.lagom.scaladsl.persistence.{AggregateEvent, AggregateEventTag, AkkaTaggerAdapter}
 import com.lightbend.lagom.scaladsl.playjson.{JsonSerializer, JsonSerializerRegistry}
-import play.api.libs.json.{Format, Json, _}
+import io.hat.shootout.impl.GameState.MaxPlayers
+import play.api.libs.json.{Format, Json}
 
 import scala.collection.immutable.Seq
 
@@ -20,11 +23,12 @@ object GameBehavior {
 
   private[impl] def create(persistenceId: PersistenceId) = EventSourcedBehavior
     .withEnforcedReplies[GameCommand, GameEvent, GameState](
-        persistenceId = persistenceId,
-        emptyState = GameState.initial,
-        commandHandler = (state, cmd) => state.applyCommand(cmd),
-        eventHandler = (state, evt) => state.applyEvent(evt)
-      )
+      persistenceId = persistenceId,
+      emptyState = GameState.initial,
+      commandHandler = (state, cmd) => state.applyCommand(cmd),
+      eventHandler = (state, evt) => state.applyEvent(evt)
+    )
+
 }
 
 
@@ -35,6 +39,7 @@ sealed trait GameState {
 }
 
 object GameState {
+  val MaxPlayers = 8
   val typeKey: EntityTypeKey[GameCommand] = EntityTypeKey[GameCommand]("Game")
   def initial: GameState = GameNotExistsState
 }
@@ -45,8 +50,8 @@ case object GameNotExistsState extends GameState {
     case CreateGame(id, name, ownerId, replyTo) =>
       Effect
         .persist( GameCreated(name, ownerId) )
-        .thenReply(replyTo) { newState => Game(id, name, ownerId, newState.status, Seq(ownerId)) }
-    case c: GameCommand => throw NotFound(s"[${c.id}] Game not exists.")
+        .thenReply(replyTo) { _ => StatusReply.Ack }
+    case c: GameCommand => Effect.reply(c.ref)( StatusReply.error[String]("Game not exists.") )
   }
 
   override def applyEvent(evt: GameEvent): GameState = evt match {
@@ -59,13 +64,21 @@ case object GameNotExistsState extends GameState {
 case class OpenGameState(name: String, owner: String, players: Seq[String]) extends GameState {
 
   override def applyCommand(cmd: GameCommand): ReplyEffect[GameEvent, GameState] = cmd match {
-    case GetGame(id, replyTo) => Effect.reply(replyTo)(Game(id, name, owner, status, players))
+
+    case GetGame(id, replyTo) => Effect.reply(replyTo)( StatusReply.success(Game(id, name, owner, status, players)) )
+
+    case Join(_, userId, replyTo) if players.contains(userId) => Effect.reply(replyTo)( StatusReply.Ack )
+    case Join(_, _, replyTo) if players.size >= MaxPlayers => Effect.reply(replyTo)( StatusReply.Error("Invalid command") )
+    case Join(_, userId, replyTo) => Effect.persist( PlayerJoined(userId) ).thenReply(replyTo) { _ => StatusReply.Ack }
+
+
 //    case StartGame() =>
-//    case Join(playerId: String) =>
+
     case unsupported => throw BadRequest(s"[${unsupported.id}] Command unsupported [$unsupported]")
   }
 
   override def applyEvent(evt: GameEvent): GameState = evt match {
+    case PlayerJoined(userId) => copy(players = players :+ userId)
     case _ => this
   }
 
@@ -84,62 +97,31 @@ object GameCreated {
   implicit val format: Format[GameCreated] = Json.format[GameCreated]
 }
 
+case class PlayerJoined(userId: String) extends GameEvent
+object PlayerJoined {
+  implicit val format: Format[PlayerJoined] = Json.format[PlayerJoined]
+}
 
 /**
  * Commands
- * GameCommandSerializable - need to use Jackson for commands serialization as it copes with `replyTo` field
  */
-trait GameCommandSerializable
-
-sealed trait GameCommand extends GameCommandSerializable {
+sealed trait GameCommand {
   val id: String
   val replyTo: ActorRef[_]
+  def ref[T]: ActorRef[T] = replyTo.asInstanceOf[ActorRef[T]]
 }
 
-case class GetGame(id: String, replyTo: ActorRef[Game]) extends GameCommand
-case class CreateGame(id: String, name: String, owner: String, replyTo: ActorRef[Game]) extends GameCommand
-
+case class GetGame(id: String, replyTo: ActorRef[StatusReply[Game]]) extends GameCommand
+case class CreateGame(id: String, name: String, owner: String, replyTo: ActorRef[StatusReply[Done]]) extends GameCommand
+case class Join(id: String, userId: String, replyTo: ActorRef[StatusReply[Done]]) extends GameCommand
 
 /**
  * Replies
  */
 case class Game(id: String, name: String, owner: String, status: String, players: Seq[String])
-
-case class GameNotExists(id: String)
-object GameNotExists {
-  implicit val format: Format[GameNotExists] = Json.format[GameNotExists]
+case object Game {
+  implicit val format: Format[Game] = Json.format[Game]
 }
-
-sealed trait Confirmation
-
-case object Confirmation {
-  implicit val format: Format[Confirmation] = new Format[Confirmation] {
-    override def reads(json: JsValue): JsResult[Confirmation] = {
-      if ((json \ "reason").isDefined)
-        Json.fromJson[Rejected](json)
-      else
-        Json.fromJson[Accepted](json)
-    }
-
-    override def writes(o: Confirmation): JsValue = {
-      o match {
-        case acc: Accepted => Json.toJson(acc)
-        case rej: Rejected => Json.toJson(rej)
-      }
-    }
-  }
-}
-
-sealed trait Accepted extends Confirmation
-case object Accepted extends Accepted {
-  implicit val format: Format[Accepted] = Format(Reads(_ => JsSuccess(Accepted)), Writes(_ => Json.obj()))
-}
-
-case class Rejected(reason: String) extends Confirmation
-object Rejected {
-  implicit val format: Format[Rejected] = Json.format
-}
-
 
 /**
  * Serializers for Events, States and Replies
@@ -149,11 +131,9 @@ object GameSerializerRegistry extends JsonSerializerRegistry {
     // States
 //    JsonSerializer[GameState],
     // Events
+    JsonSerializer[PlayerJoined],
     JsonSerializer[GameCreated],
     // Replies
-    JsonSerializer[GameNotExists],
-    JsonSerializer[Confirmation],
-    JsonSerializer[Accepted],
-    JsonSerializer[Rejected]
+    JsonSerializer[Game],
   )
 }

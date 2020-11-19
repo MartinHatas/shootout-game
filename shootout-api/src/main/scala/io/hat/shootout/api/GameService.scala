@@ -20,7 +20,7 @@ trait GameService extends Service {
   /**
     * curl -X POST -s 'http://localhost:9000/api/game?name=wild-west' -H "Authorization: Bearer $SHOOTOUT_JWT" | jq .
     */
-  def createGame(name: String): ServiceCall[NotUsed, GameMessage]
+  def createGame(name: String): ServiceCall[NotUsed, ConfirmationMessage]
 
   /**
    * curl 'http://localhost:9000/api/game/19f0c829-17ff-401d-9c5f-ffc661302dfa/stream'
@@ -28,20 +28,19 @@ trait GameService extends Service {
   def gameStream(id: String): ServiceCall[NotUsed, Source[String, NotUsed]]
 
   /**
-   * curl -X PATCH 'http://localhost:9000/api/game/19f0c829-17ff-401d-9c5f-ffc661302dfa/status?value=active' -H "Authorization: Bearer $SHOOTOUT_JWT"  | jq .
-   */
+    * curl -X PATCH 'http://localhost:9000/api/game/19f0c829-17ff-401d-9c5f-ffc661302dfa/status?value=active' -H "Authorization: Bearer $SHOOTOUT_JWT"  | jq .
+    */
   def updateGame(id: String, attribute: String, value: String): ServiceCall[NotUsed, ConfirmationMessage]
 
   /**
-    * Example: curl -H "Content-Type: application/json" -X POST -d '{"message":
-    * "Hi"}' http://localhost:9000/api/hello/Alice
+    * curl -X PATCH 'http://localhost:9000/api/game/19f0c829-17ff-401d-9c5f-ffc661302dfa/join' -H "Authorization: Bearer $SHOOTOUT_JWT"  | jq .
     */
-//  def useGreeting(id: String): ServiceCall[String, Done]
+  def joinGame(id: String): ServiceCall[NotUsed, ConfirmationMessage]
 
   /**
     * This gets published to Kafka.
     */
-//  def greetingsTopic(): Topic[String]
+//  def gameStream(id: String): Topic[String]
 
   override final def descriptor: Descriptor = {
     import Service._
@@ -50,11 +49,12 @@ trait GameService extends Service {
       .withCalls(
         restCall(Method.POST ,"/api/game?name", createGame _),
         restCall(Method.GET, "/api/game/:id", getGame _),
+        restCall(Method.PATCH, "/api/game/:id/join", joinGame _),
         restCall(Method.PATCH, "/api/game/:id/:atribute?value", updateGame _),
         restCall(Method.GET, "/api/game/:id/stream", gameStream _),
       )
 //      .withTopics(
-//        topic(GameService.TOPIC_NAME, greetingsTopic _)
+//        topic(GameService.TOPIC_NAME, gameStream _)
 //          // Kafka partitions messages, messages within the same partition will
 //          // be delivered in order, to ensure that all messages for the same user
 //          // go to the same partition (and hence are delivered in order with respect
@@ -66,26 +66,10 @@ trait GameService extends Service {
 //          )
 //      )
       .withAutoAcl(true)
-    // @formatter:on
   }
 }
 
-/**
-  * The greeting message class.
-  */
-//case class GreetingMessage(message: String)
-//
-//object GreetingMessage {
-//  /**
-//    * Format for converting greeting messages to and from JSON.
-//    *
-//    * This will be picked up by a Lagom implicit conversion from Play's JSON format to Lagom's message serializer.
-//    */
-//  implicit val format: Format[GreetingMessage] = Json.format[GreetingMessage]
-//}
-
 case class GameMessage(id: String, name: String, owner: String, status: String, players: Seq[String])
-
 object GameMessage {
   implicit val format: Format[GameMessage] = Json.format[GameMessage]
 }
@@ -111,14 +95,12 @@ case object ConfirmationMessage {
 }
 
 
-sealed trait AcceptedMessage extends ConfirmationMessage
-
-case object AcceptedMessage extends AcceptedMessage {
-  implicit val format: Format[AcceptedMessage] = Format(Reads(_ => JsSuccess(AcceptedMessage)), Writes(_ => Json.obj()))
+case class AcceptedMessage(message: String) extends ConfirmationMessage
+case object AcceptedMessage {
+  implicit val format: Format[AcceptedMessage] = Json.format
 }
 
 case class RejectedMessage(reason: String) extends ConfirmationMessage
-
 object RejectedMessage {
   implicit val format: Format[RejectedMessage] = Json.format
 }

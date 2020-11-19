@@ -4,6 +4,7 @@ import java.util.UUID
 
 import akka.NotUsed
 import akka.cluster.sharding.typed.scaladsl.{ClusterSharding, EntityRef}
+import akka.pattern.StatusReply.ErrorMessage
 import akka.persistence.query.Offset
 import akka.stream.scaladsl.Source
 import akka.util.Timeout
@@ -28,32 +29,34 @@ class GameServiceImpl(clusterSharding: ClusterSharding, persistentEntityRegistry
   private def entityRef(id: String): EntityRef[GameCommand] =
     clusterSharding.entityRefFor(GameState.typeKey, id)
 
-  implicit val timeout = Timeout(5.seconds)
+  implicit val timeout = Timeout(2.seconds)
 
   override def getGame(gameId: String): ServiceCall[NotUsed, GameMessage] = ServiceCall { _ =>
 
     val game = entityRef(gameId)
 
-      game
-        .ask[Game](replyTo => GetGame(gameId, replyTo))
-        .map(game => GameMessage(game.id, game.name, game.owner, game.status, game.players))
+    game
+      .askWithStatus[Game](replyTo => GetGame(gameId, replyTo))
+      .map(game => GameMessage(game.id, game.name, game.owner, game.status, game.players))
   }
 
   /**
    * curl -X POST -s 'http://localhost:9000/api/game?name=wild-west' -H "Authorization: Bearer $SHOOTOUT_JWT" | jq .
    */
-  override def createGame(name: String): ServiceCall[NotUsed, GameMessage] = {
+  override def createGame(name: String): ServiceCall[NotUsed, ConfirmationMessage] = {
     authorize(isAuthenticated[CommonProfile](), (profile: CommonProfile) =>
       ServerServiceCall { _: NotUsed =>
         val ownerId = profile.getId
-        val gameId = UUID.randomUUID().toString
+        val id = UUID.randomUUID().toString
 
-        val game = entityRef(gameId)
+        val game = entityRef(id)
 
-        log.info("[{}] Creating new game [{}]", gameId, profile.toString)
-
-        (game ? (self => CreateGame(gameId, name, ownerId, self)))
-          .map(response => GameMessage(response.id, response.name, response.owner, response.status, response.players))
+        game.askWithStatus(replyTo => CreateGame(id, name, ownerId, replyTo))
+          .map( _ => AcceptedMessage(id) ).mapTo[ConfirmationMessage]
+          .recover {
+            case ErrorMessage(reason) => RejectedMessage(reason)
+            case _ => RejectedMessage(s"[$id] Failed to create the game.")
+          }
       })
   }
 
@@ -69,21 +72,41 @@ class GameServiceImpl(clusterSharding: ClusterSharding, persistentEntityRegistry
   }
 
   /**
+   * curl -X PATCH 'http://localhost:9000/api/game/19f0c829-17ff-401d-9c5f-ffc661302dfa/join' -H "Authorization: Bearer $SHOOTOUT_JWT"  | jq .
+   */
+  override def joinGame(id: String): ServiceCall[NotUsed, ConfirmationMessage] = {
+    authorize(isAuthenticated[CommonProfile](), (profile: CommonProfile) =>
+      ServerServiceCall { _: NotUsed =>
+        val userId = profile.getId
+        val game = entityRef(id)
+
+        game.askWithStatus(replyTo => Join(id, userId, replyTo))
+          .map( _ => AcceptedMessage(id) ).mapTo[ConfirmationMessage]
+          .recover {
+            case ErrorMessage(reason) => RejectedMessage(reason)
+            case _ => RejectedMessage(s"[$id] Failed to join the game.")
+          }
+      })
+  }
+
+  /**
    * curl -X PATCH 'http://localhost:9000/api/game/19f0c829-17ff-401d-9c5f-ffc661302dfa/status?value=active' -H "Authorization: Bearer $SHOOTOUT_JWT" | jq .
    */
   override def updateGame(gameId: String, attribute: String, value: String): ServiceCall[NotUsed, ConfirmationMessage] = ServiceCall { _ =>
 
-    val game = entityRef(gameId)
+//    val game = entityRef(gameId)
+//
+//    val gameResponse: Future[Done] = attribute match {
+////      case "status" => game ? (self => ChangeStatus(gameId, value, self))
+//      case _ => Future.successful(StatusReply.error[Done](s"[$gameId] Unknown game attribute [$attribute]"))
+//    }
+//
+//    gameResponse map {
+//      case a: Accepted    => AcceptedMessage()
+//      case e: ErrorReply  => RejectedMessage(e.reason)
+//    }
 
-    val gameResponse: Future[Confirmation] = attribute match {
-//      case "status" => game ? (self => ChangeStatus(gameId, value, self))
-      case _ => Future.successful(Rejected(s"[$gameId] Unknown game attribute [$attribute]"))
-    }
-
-    gameResponse map {
-      case Accepted      => AcceptedMessage
-      case Rejected(reason) => RejectedMessage(reason)
-    }
+    Future.successful(RejectedMessage("Not implemented yet"))
 
   }
 

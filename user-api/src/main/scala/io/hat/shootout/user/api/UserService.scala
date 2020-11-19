@@ -6,6 +6,9 @@ import play.api.libs.json.{Format, Json}
 
 trait UserService extends Service {
 
+  /*
+  * curl -X POST http://localhost:9000/api/user/login -d '{"email":"ja.nejsem.opice@gmail.com","password":"dummy"}'
+  * */
   def login: ServiceCall[LoginRequest, LoginResponse]
 
   override final def descriptor: Descriptor = {
