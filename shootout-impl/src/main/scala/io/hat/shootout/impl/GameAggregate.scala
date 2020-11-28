@@ -94,12 +94,12 @@ object GameEvent {
 
 case class GameCreated(name: String, owner: String) extends GameEvent
 object GameCreated {
-  implicit val format: Format[GameCreated] = Json.format[GameCreated]
+  implicit val format: Format[GameCreated] = Json.format
 }
 
 case class PlayerJoined(userId: String) extends GameEvent
 object PlayerJoined {
-  implicit val format: Format[PlayerJoined] = Json.format[PlayerJoined]
+  implicit val format: Format[PlayerJoined] = Json.format
 }
 
 /**
@@ -120,7 +120,7 @@ case class Join(id: String, userId: String, replyTo: ActorRef[StatusReply[Done]]
  */
 case class Game(id: String, name: String, owner: String, status: String, players: Seq[String])
 case object Game {
-  implicit val format: Format[Game] = Json.format[Game]
+  implicit val format: Format[Game] = Json.format
 }
 
 /**
@@ -129,7 +129,7 @@ case object Game {
 object GameSerializerRegistry extends JsonSerializerRegistry {
   override def serializers: Seq[JsonSerializer[_]] = Seq(
     // States
-//    JsonSerializer[GameState],
+//    JsonSerializer[OpenGameState],
     // Events
     JsonSerializer[PlayerJoined],
     JsonSerializer[GameCreated],

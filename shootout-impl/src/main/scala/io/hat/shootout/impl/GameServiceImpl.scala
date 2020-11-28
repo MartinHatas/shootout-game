@@ -17,6 +17,7 @@ import org.pac4j.core.config.Config
 import org.pac4j.core.profile.CommonProfile
 import org.pac4j.lagom.scaladsl.SecuredService
 import org.slf4j.{Logger, LoggerFactory}
+import play.api.libs.json.Json
 
 import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Future}
@@ -68,7 +69,20 @@ class GameServiceImpl(clusterSharding: ClusterSharding, persistentEntityRegistry
       .eventStream(GameEvent.Tag, Offset.noOffset)
       .filter(event => event.entityId == id)
       .map(event => convertEvent(event))
+      .filter(_.isDefined)
+      .map(_.get)
     )
+  }
+
+  private def convertEvent(gameEvent: EventStreamElement[GameEvent]): Option[String] = {
+    val eventJson = gameEvent.event match {
+      case e: GameCreated => Some(Json.toJson(e))
+      case e: PlayerJoined => Some(Json.toJson(e))
+      case _ => None
+    }
+    eventJson
+      .map(event => Json.obj("type" -> gameEvent.event.getClass.getSimpleName, "data" -> event))
+      .map(_.toString())
   }
 
   /**
@@ -107,37 +121,8 @@ class GameServiceImpl(clusterSharding: ClusterSharding, persistentEntityRegistry
 //    }
 
     Future.successful(RejectedMessage("Not implemented yet"))
-
   }
 
 
-//  override def useGreeting(id: String) = ServiceCall { request =>
-//    // Look up the sharded entity (aka the aggregate instance) for the given ID.
-//    val ref = entityRef(id)
-//
-//    // Tell the aggregate to use the greeting message specified.
-//    ref
-//      .ask[Confirmation](
-//        replyTo => UseGreetingMessage(request.message, replyTo)
-//      )
-//      .map {
-//        case Accepted => Done
-//        case _        => throw BadRequest("Can't upgrade the greeting message.")
-//      }
-//  }
-//
-//  override def greetingsTopic(): Topic[String] =
-//    TopicProducer.singleStreamWithOffset { fromOffset =>
-//      persistentEntityRegistry
-//        .eventStream(GameEvent.Tag, fromOffset)
-//        .map(ev => (convertEvent(ev), ev.offset))
-//    }
-
-  private def convertEvent(gameEvent: EventStreamElement[GameEvent]): String = {
-    gameEvent.event match {
-//      case event => Json.toJson(Map("action" -> gameEvent.event.getClass.getSimpleName, "data" -> event)).asText()
-      case event => event.toString
-    }
-  }
 
 }

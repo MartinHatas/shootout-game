@@ -3,6 +3,8 @@ package io.hat.shootout.impl
 import java.util.UUID
 
 import akka.actor.testkit.typed.scaladsl.ScalaTestWithActorTestKit
+import akka.pattern.StatusReply
+import akka.pattern.StatusReply.Success
 import akka.persistence.typed.PersistenceId
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpecLike
@@ -16,10 +18,10 @@ class HelloAggregateSpec extends ScalaTestWithActorTestKit(s"""
   "Game Aggregate" should {
 
     "return GameState " in {
-      val probe = createTestProbe[Game]()
+      val probe = createTestProbe[StatusReply[Game]]()
       val ref = spawn(GameBehavior.create(PersistenceId("fake-type-hint", "fake-id")))
       ref ! GetGame("123", probe.ref)
-      probe.expectMessage(Game("", "", "", "pre-start", Seq()))
+      probe.expectMessage(Success(Game("", "", "", "pre-start", Seq())))
     }
 
 //    "allow updating the greeting message" in  {
