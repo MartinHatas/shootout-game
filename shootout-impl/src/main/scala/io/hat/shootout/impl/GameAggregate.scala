@@ -9,6 +9,7 @@ import akka.persistence.typed.scaladsl.{Effect, EventSourcedBehavior, ReplyEffec
 import com.lightbend.lagom.scaladsl.api.transport.BadRequest
 import com.lightbend.lagom.scaladsl.persistence.{AggregateEvent, AggregateEventTag, AkkaTaggerAdapter}
 import com.lightbend.lagom.scaladsl.playjson.{JsonSerializer, JsonSerializerRegistry}
+import io.hat.shootout.impl.CharacterSelectionState.PlayerSelectingCharacter
 import io.hat.shootout.impl.GameState.MaxPlayers
 import play.api.libs.json.{Format, Json}
 
@@ -30,7 +31,6 @@ object GameBehavior {
     )
 
 }
-
 
 sealed trait GameState {
   lazy val status: String = this.getClass.getSimpleName
@@ -61,7 +61,7 @@ case object GameNotExistsState extends GameState {
 
 }
 
-case class OpenGameState(name: String, owner: String, players: Seq[String]) extends GameState {
+final case class OpenGameState(name: String, owner: String, players: Seq[String]) extends GameState {
 
   override def applyCommand(cmd: GameCommand): ReplyEffect[GameEvent, GameState] = cmd match {
 
@@ -71,8 +71,8 @@ case class OpenGameState(name: String, owner: String, players: Seq[String]) exte
     case Join(_, _, replyTo) if players.size >= MaxPlayers => Effect.reply(replyTo)( StatusReply.Error("Invalid command") )
     case Join(_, userId, replyTo) => Effect.persist( PlayerJoined(userId) ).thenReply(replyTo) { _ => StatusReply.Ack }
 
-
-//    case StartGame() =>
+    //Can check authorization (is owner) in service>
+    case StartGame(id, userId, replyTo) => ???
 
     case unsupported => throw BadRequest(s"[${unsupported.id}] Command unsupported [$unsupported]")
   }
@@ -82,6 +82,17 @@ case class OpenGameState(name: String, owner: String, players: Seq[String]) exte
     case _ => this
   }
 
+}
+
+final case class CharacterSelectionState(name: String, owner: String, players: Seq[PlayerSelectingCharacter]) extends GameState {
+
+  override def applyCommand(cmd: GameCommand): ReplyEffect[GameEvent, GameState] = ???
+
+  override def applyEvent(evt: GameEvent): GameState = ???
+}
+
+object CharacterSelectionState {
+  case class PlayerSelectingCharacter(playerId: String, charactersDeal: Seq[Character], pick: Character)
 }
 
 sealed trait GameEvent extends AggregateEvent[GameEvent] {
@@ -114,6 +125,7 @@ sealed trait GameCommand {
 case class GetGame(id: String, replyTo: ActorRef[StatusReply[Game]]) extends GameCommand
 case class CreateGame(id: String, name: String, owner: String, replyTo: ActorRef[StatusReply[Done]]) extends GameCommand
 case class Join(id: String, userId: String, replyTo: ActorRef[StatusReply[Done]]) extends GameCommand
+case class StartGame(id: String, userId: String, replyTo: ActorRef[StatusReply[Done]]) extends GameCommand
 
 /**
  * Replies
