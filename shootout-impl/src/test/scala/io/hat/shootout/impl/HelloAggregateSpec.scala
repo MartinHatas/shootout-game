@@ -18,10 +18,10 @@ class HelloAggregateSpec extends ScalaTestWithActorTestKit(s"""
   "Game Aggregate" should {
 
     "return GameState " in {
-      val probe = createTestProbe[StatusReply[Game]]()
+      val probe = createTestProbe[StatusReply[GameReply]]()
       val ref = spawn(GameBehavior.create(PersistenceId("fake-type-hint", "fake-id")))
       ref ! GetGame("123", probe.ref)
-      probe.expectMessage(Success(Game("", "", "", "pre-start", Seq())))
+      probe.expectMessage(Success(GameReply("", "", "", "pre-start", Seq())))
     }
 
 //    "allow updating the greeting message" in  {

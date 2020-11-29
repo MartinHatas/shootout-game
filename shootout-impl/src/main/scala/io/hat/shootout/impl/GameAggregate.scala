@@ -1,5 +1,8 @@
 package io.hat.shootout.impl
 
+import java.time.ZonedDateTime
+import java.time.ZonedDateTime.now
+
 import akka.Done
 import akka.actor.typed.{ActorRef, Behavior}
 import akka.cluster.sharding.typed.scaladsl._
@@ -33,7 +36,7 @@ object GameBehavior {
 }
 
 sealed trait GameState {
-  lazy val status: String = this.getClass.getSimpleName
+  lazy val stateName: String = this.getClass.getSimpleName
   def applyCommand(cmd: GameCommand): ReplyEffect[GameEvent, GameState]
   def applyEvent(evt: GameEvent): GameState
 }
@@ -49,13 +52,13 @@ case object GameNotExistsState extends GameState {
   override def applyCommand(cmd: GameCommand): ReplyEffect[GameEvent, GameState] = cmd match {
     case CreateGame(id, name, ownerId, replyTo) =>
       Effect
-        .persist( GameCreated(name, ownerId) )
+        .persist( GameCreated(name, ownerId, now()) )
         .thenReply(replyTo) { _ => StatusReply.Ack }
     case c: GameCommand => Effect.reply(c.ref)( StatusReply.error[String]("Game not exists.") )
   }
 
   override def applyEvent(evt: GameEvent): GameState = evt match {
-    case GameCreated(name, owner) => OpenGameState(name, owner, Seq(owner))
+    case GameCreated(name, owner, _) => OpenGameState(name, owner, Seq(owner))
     case _ => GameNotExistsState
   }
 
@@ -65,34 +68,43 @@ final case class OpenGameState(name: String, owner: String, players: Seq[String]
 
   override def applyCommand(cmd: GameCommand): ReplyEffect[GameEvent, GameState] = cmd match {
 
-    case GetGame(id, replyTo) => Effect.reply(replyTo)( StatusReply.success(Game(id, name, owner, status, players)) )
+    case GetGame(id, replyTo) => Effect.reply(replyTo)( StatusReply.success(GameReply(id, name, owner, stateName, players)) )
+    case QueryOwner(_, replyTo) => Effect.reply(replyTo)( OwnerReply(owner) )
 
     case Join(_, userId, replyTo) if players.contains(userId) => Effect.reply(replyTo)( StatusReply.Ack )
     case Join(_, _, replyTo) if players.size >= MaxPlayers => Effect.reply(replyTo)( StatusReply.Error("Invalid command") )
-    case Join(_, userId, replyTo) => Effect.persist( PlayerJoined(userId) ).thenReply(replyTo) { _ => StatusReply.Ack }
+    case Join(_, userId, replyTo) => Effect.persist( PlayerJoined(userId, now()) ).thenReply(replyTo) { _ => StatusReply.Ack }
 
-    //Can check authorization (is owner) in service>
-    case StartGame(id, userId, replyTo) => ???
+    case StartGame(_, replyTo) => Effect
+      .persist( GameStateChanged(CharacterSelectionState.getClass.getSimpleName, now()) )
+      .thenReply(replyTo) { _ => StatusReply.Ack }
 
-    case unsupported => throw BadRequest(s"[${unsupported.id}] Command unsupported [$unsupported]")
+    case unsupported => throw BadRequest(s"[${unsupported.id}] Command unsupported [$unsupported] in state [$stateName]")
   }
 
   override def applyEvent(evt: GameEvent): GameState = evt match {
-    case PlayerJoined(userId) => copy(players = players :+ userId)
+    case PlayerJoined(userId, _) => copy(players = players :+ userId)
+    case GameStateChanged(state, _) if state == CharacterSelectionState.getClass.getSimpleName =>
+      CharacterSelectionState(name, owner, players.map(playerId => PlayerSelectingCharacter(playerId, Seq(), None) ))
     case _ => this
   }
-
 }
 
 final case class CharacterSelectionState(name: String, owner: String, players: Seq[PlayerSelectingCharacter]) extends GameState {
 
-  override def applyCommand(cmd: GameCommand): ReplyEffect[GameEvent, GameState] = ???
+  override def applyCommand(cmd: GameCommand): ReplyEffect[GameEvent, GameState] = cmd match {
+    case GetGame(id, replyTo) => Effect.reply(replyTo)( StatusReply.success(GameReply(id, name, owner, stateName, players.map(_.playerId))) )
+    case QueryOwner(_, replyTo) => Effect.reply(replyTo)( OwnerReply(owner) )
+    case unsupported => throw BadRequest(s"[${unsupported.id}] Command unsupported [$unsupported] in state [$stateName]")
+  }
 
-  override def applyEvent(evt: GameEvent): GameState = ???
+  override def applyEvent(evt: GameEvent): GameState = evt match {
+    case _ => this
+  }
 }
 
 object CharacterSelectionState {
-  case class PlayerSelectingCharacter(playerId: String, charactersDeal: Seq[Character], pick: Character)
+  case class PlayerSelectingCharacter(playerId: String, charactersDeal: Seq[Character], pick: Option[Character])
 }
 
 sealed trait GameEvent extends AggregateEvent[GameEvent] {
@@ -100,17 +112,22 @@ sealed trait GameEvent extends AggregateEvent[GameEvent] {
 }
 
 object GameEvent {
-  val Tag: AggregateEventTag[GameEvent] = AggregateEventTag[GameEvent]
+  val Tag: AggregateEventTag[GameEvent] = AggregateEventTag[GameEvent]()
 }
 
-case class GameCreated(name: String, owner: String) extends GameEvent
+case class GameCreated(name: String, owner: String, timestamp: ZonedDateTime) extends GameEvent
 object GameCreated {
   implicit val format: Format[GameCreated] = Json.format
 }
 
-case class PlayerJoined(userId: String) extends GameEvent
+case class PlayerJoined(userId: String, timestamp: ZonedDateTime) extends GameEvent
 object PlayerJoined {
   implicit val format: Format[PlayerJoined] = Json.format
+}
+
+case class GameStateChanged(state: String, timestamp: ZonedDateTime) extends GameEvent
+object GameStateChanged {
+  implicit val format: Format[GameStateChanged] = Json.format
 }
 
 /**
@@ -122,17 +139,23 @@ sealed trait GameCommand {
   def ref[T]: ActorRef[T] = replyTo.asInstanceOf[ActorRef[T]]
 }
 
-case class GetGame(id: String, replyTo: ActorRef[StatusReply[Game]]) extends GameCommand
+case class GetGame(id: String, replyTo: ActorRef[StatusReply[GameReply]]) extends GameCommand
 case class CreateGame(id: String, name: String, owner: String, replyTo: ActorRef[StatusReply[Done]]) extends GameCommand
 case class Join(id: String, userId: String, replyTo: ActorRef[StatusReply[Done]]) extends GameCommand
-case class StartGame(id: String, userId: String, replyTo: ActorRef[StatusReply[Done]]) extends GameCommand
+case class StartGame(id: String, replyTo: ActorRef[StatusReply[Done]]) extends GameCommand
+case class QueryOwner(id: String, replyTo: ActorRef[OwnerReply]) extends GameCommand
 
 /**
  * Replies
  */
-case class Game(id: String, name: String, owner: String, status: String, players: Seq[String])
-case object Game {
-  implicit val format: Format[Game] = Json.format
+case class GameReply(id: String, name: String, owner: String, status: String, players: Seq[String])
+case object GameReply {
+  implicit val format: Format[GameReply] = Json.format
+}
+
+case class OwnerReply(id: String)
+case object OwnerReply {
+  implicit val format: Format[OwnerReply] = Json.format
 }
 
 /**
@@ -140,12 +163,12 @@ case object Game {
  */
 object GameSerializerRegistry extends JsonSerializerRegistry {
   override def serializers: Seq[JsonSerializer[_]] = Seq(
-    // States
-//    JsonSerializer[OpenGameState],
     // Events
     JsonSerializer[PlayerJoined],
     JsonSerializer[GameCreated],
+    JsonSerializer[GameStateChanged],
     // Replies
-    JsonSerializer[Game],
+    JsonSerializer[GameReply],
+    JsonSerializer[OwnerReply]
   )
 }

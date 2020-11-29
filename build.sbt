@@ -1,3 +1,5 @@
+import sbt.Keys.scalacOptions
+
 organization in ThisBuild := "com.hat"
 version in ThisBuild := "1.0-SNAPSHOT"
 
@@ -8,7 +10,20 @@ val macwire = "com.softwaremill.macwire" %% "macros" % "2.3.3" % "provided"
 val scalaTest = "org.scalatest" %% "scalatest" % "3.1.1" % Test
 
 lazy val `shootout` = (project in file("."))
-  .aggregate(`shootout-api`, `shootout-impl`)
+  .aggregate(`shootout-api`, `shootout-impl`, `user-api`, `user-impl`)
+  .settings(
+    scalacOptions ++= Seq(
+    "-encoding", "utf8",
+    "-Xfatal-warnings",
+    "-deprecation",
+    "-unchecked",
+    "-language:implicitConversions",
+    "-language:higherKinds",
+    "-language:existentials",
+    "-language:postfixOps"
+    )
+  )
+
 
 val pac4jVersion = "3.7.0"
 val lagomPac4j = "org.pac4j" %% "lagom-pac4j" % "2.2.1"
@@ -34,7 +49,7 @@ lazy val `user-impl` = (project in file("user-impl"))
       pac4jJwt,
       macwire,
       scalaTest
-    )
+    ),
   )
   .settings(lagomForkedTestSettings)
   .dependsOn(`user-api`)

@@ -12,6 +12,8 @@ import com.lightbend.lagom.scaladsl.api.ServiceCall
 import com.lightbend.lagom.scaladsl.persistence.{EventStreamElement, PersistentEntityRegistry}
 import com.lightbend.lagom.scaladsl.server.ServerServiceCall
 import io.hat.shootout.api._
+import io.hat.shootout.impl.auth.GameOwnerAuthorizer.isGameOwner
+import org.pac4j.core.authorization.authorizer.AndAuthorizer.and
 import org.pac4j.core.authorization.authorizer.IsAuthenticatedAuthorizer.isAuthenticated
 import org.pac4j.core.config.Config
 import org.pac4j.core.profile.CommonProfile
@@ -37,12 +39,12 @@ class GameServiceImpl(clusterSharding: ClusterSharding, persistentEntityRegistry
     val game = entityRef(gameId)
 
     game
-      .askWithStatus[Game](replyTo => GetGame(gameId, replyTo))
+      .askWithStatus[GameReply](replyTo => GetGame(gameId, replyTo))
       .map(game => GameMessage(game.id, game.name, game.owner, game.status, game.players))
   }
 
   /**
-   * curl -X POST -s 'http://localhost:9000/api/game?name=wild-west' -H "Authorization: Bearer $SHOOTOUT_JWT" | jq .
+   * curl -X POST -s 'http://localhost:9000/api/game?name=wild-west' -H "Authorization: Bearer $JWT" | jq .
    */
   override def createGame(name: String): ServiceCall[NotUsed, ConfirmationMessage] = {
     authorize(isAuthenticated[CommonProfile](), (profile: CommonProfile) =>
@@ -62,7 +64,25 @@ class GameServiceImpl(clusterSharding: ClusterSharding, persistentEntityRegistry
   }
 
   /**
-   * curl 'http://localhost:9000/api/game/19f0c829-17ff-401d-9c5f-ffc661302dfa/stream'
+   * curl -X PATCH 'http://localhost:9000/api/game/${GAME_ID}/start' -H "Authorization: Bearer $JWT"  | jq .
+   */
+  override def startGame(id: String): ServiceCall[NotUsed, ConfirmationMessage] = {
+    authorize(and(isAuthenticated[CommonProfile](), isGameOwner(id)(clusterSharding, ec)), (profile: CommonProfile) =>
+      ServerServiceCall { _: NotUsed =>
+
+        val game = entityRef(id)
+
+        game.askWithStatus(replyTo => StartGame(id, replyTo))
+          .map( _ => AcceptedMessage(id) ).mapTo[ConfirmationMessage]
+          .recover {
+            case ErrorMessage(reason) => RejectedMessage(reason)
+            case _ => RejectedMessage(s"[$id] Failed to start the game.")
+          }
+      })
+  }
+
+  /**
+   * curl 'http://localhost:9000/api/game/${GAME_ID}/stream'
    */
   override def gameStream(id: String): ServiceCall[NotUsed, Source[String, NotUsed]] = ServiceCall { _ =>
     Future.successful(persistentEntityRegistry
@@ -78,6 +98,7 @@ class GameServiceImpl(clusterSharding: ClusterSharding, persistentEntityRegistry
     val eventJson = gameEvent.event match {
       case e: GameCreated => Some(Json.toJson(e))
       case e: PlayerJoined => Some(Json.toJson(e))
+      case e: GameStateChanged => Some(Json.toJson(e))
       case _ => None
     }
     eventJson
@@ -86,7 +107,7 @@ class GameServiceImpl(clusterSharding: ClusterSharding, persistentEntityRegistry
   }
 
   /**
-   * curl -X PATCH 'http://localhost:9000/api/game/19f0c829-17ff-401d-9c5f-ffc661302dfa/join' -H "Authorization: Bearer $SHOOTOUT_JWT"  | jq .
+   * curl -X PATCH 'http://localhost:9000/api/game/${GAME_ID}/join' -H "Authorization: Bearer $JWT1"  | jq .
    */
   override def joinGame(id: String): ServiceCall[NotUsed, ConfirmationMessage] = {
     authorize(isAuthenticated[CommonProfile](), (profile: CommonProfile) =>
@@ -104,21 +125,21 @@ class GameServiceImpl(clusterSharding: ClusterSharding, persistentEntityRegistry
   }
 
   /**
-   * curl -X PATCH 'http://localhost:9000/api/game/19f0c829-17ff-401d-9c5f-ffc661302dfa/status?value=active' -H "Authorization: Bearer $SHOOTOUT_JWT" | jq .
+   * curl -X PATCH 'http://localhost:9000/api/game/${GAME_ID}/status?value=active' -H "Authorization: Bearer $JWT" | jq .
    */
   override def updateGame(gameId: String, attribute: String, value: String): ServiceCall[NotUsed, ConfirmationMessage] = ServiceCall { _ =>
 
-//    val game = entityRef(gameId)
-//
-//    val gameResponse: Future[Done] = attribute match {
-////      case "status" => game ? (self => ChangeStatus(gameId, value, self))
-//      case _ => Future.successful(StatusReply.error[Done](s"[$gameId] Unknown game attribute [$attribute]"))
-//    }
-//
-//    gameResponse map {
-//      case a: Accepted    => AcceptedMessage()
-//      case e: ErrorReply  => RejectedMessage(e.reason)
-//    }
+    //    val game = entityRef(gameId)
+    //
+    //    val gameResponse: Future[Done] = attribute match {
+    ////      case "status" => game ? (self => ChangeStatus(gameId, value, self))
+    //      case _ => Future.successful(StatusReply.error[Done](s"[$gameId] Unknown game attribute [$attribute]"))
+    //    }
+    //
+    //    gameResponse map {
+    //      case a: Accepted    => AcceptedMessage()
+    //      case e: ErrorReply  => RejectedMessage(e.reason)
+    //    }
 
     Future.successful(RejectedMessage("Not implemented yet"))
   }
