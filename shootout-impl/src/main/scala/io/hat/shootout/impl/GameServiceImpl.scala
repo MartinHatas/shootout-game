@@ -94,6 +94,7 @@ class GameServiceImpl(clusterSharding: ClusterSharding, persistentEntityRegistry
     )
   }
 
+
   private def convertEvent(gameEvent: EventStreamElement[GameEvent]): Option[String] = {
     val eventJson = gameEvent.event match {
       case e: GameCreated => Some(Json.toJson(e))

@@ -17,3 +17,5 @@ curl -s -X PATCH "http://localhost:9000/api/game/$GAME_ID/start" -H "Authorizati
 curl -s "http://localhost:9000/api/game/$GAME_ID" | jq .
 
 
+echo "Subscribing game stream"
+curl --include --no-buffer -H "Connection: Upgrade" -H "Upgrade: websocket" -H "Sec-WebSocket-Version: 13" -H "Sec-WebSocket-Key: jfDTIhrY8lJvFEdttPj7uA==" -H "Host: localhost:9000" -H "Origin: http://localhost:9000" "http://localhost:9000/api/game/$GAME_ID/stream"  -o -
