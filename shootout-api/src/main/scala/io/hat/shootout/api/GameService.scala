@@ -25,7 +25,7 @@ trait GameService extends Service {
   /**
    * curl "http://localhost:9000/api/game/${GAME_ID}/stream"
    */
-  def gameStream(id: String): ServiceCall[NotUsed, Source[String, NotUsed]]
+  def gameStream(id: String): ServiceCall[NotUsed, Source[StreamMessage, NotUsed]]
 
   /**
    * curl -X PATCH "http://localhost:9000/api/game/${GAME_ID}/status?value=active" -H "Authorization: Bearer $JWT"  | jq .
@@ -60,18 +60,6 @@ trait GameService extends Service {
         restCall(Method.PATCH, "/api/game/:id/:atribute?value", updateGame _),
         restCall(Method.GET, "/api/game/:id/stream", gameStream _),
       )
-      //      .withTopics(
-      //        topic(GameService.TOPIC_NAME, gameStream _)
-      //          // Kafka partitions messages, messages within the same partition will
-      //          // be delivered in order, to ensure that all messages for the same user
-      //          // go to the same partition (and hence are delivered in order with respect
-      //          // to that user), we configure a partition key strategy that extracts the
-      //          // name as the partition key.
-      //          .addProperty(
-      //            KafkaProperties.partitionKeyStrategy,
-      //            PartitionKeyStrategy[String](_)
-      //          )
-      //      )
       .withAutoAcl(true)
   }
 
@@ -111,6 +99,11 @@ case object AcceptedMessage {
 case class RejectedMessage(reason: String) extends ConfirmationMessage
 object RejectedMessage {
   implicit val format: Format[RejectedMessage] = Json.format
+}
+
+case class StreamMessage(`type`: String, data: JsValue)
+object StreamMessage {
+  implicit val format: Format[StreamMessage] = Json.format
 }
 
 

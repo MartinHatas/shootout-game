@@ -10,8 +10,9 @@ import akka.pattern.StatusReply
 import akka.persistence.typed.PersistenceId
 import akka.persistence.typed.scaladsl.{Effect, EventSourcedBehavior, ReplyEffect}
 import com.lightbend.lagom.scaladsl.api.transport.BadRequest
-import com.lightbend.lagom.scaladsl.persistence.{AggregateEvent, AggregateEventTag, AkkaTaggerAdapter}
+import com.lightbend.lagom.scaladsl.persistence.{AggregateEvent, AggregateEventShards, AggregateEventTag, AkkaTaggerAdapter}
 import com.lightbend.lagom.scaladsl.playjson.{JsonSerializer, JsonSerializerRegistry}
+import io.hat.shootout.api.StreamMessage
 import io.hat.shootout.impl.CharacterSelectionState.PlayerSelectingCharacter
 import io.hat.shootout.impl.GameState.MaxPlayers
 import play.api.libs.json.{Format, Json}
@@ -108,11 +109,12 @@ object CharacterSelectionState {
 }
 
 sealed trait GameEvent extends AggregateEvent[GameEvent] {
-  def aggregateTag: AggregateEventTag[GameEvent] = GameEvent.Tag
+  def aggregateTag: AggregateEventShards[GameEvent] = GameEvent.Tag
 }
 
 object GameEvent {
-  val Tag: AggregateEventTag[GameEvent] = AggregateEventTag[GameEvent]()
+  val NumShards = 10
+  val Tag       = AggregateEventTag.sharded[GameEvent]("GameEvent", NumShards)
 }
 
 case class GameCreated(name: String, owner: String, timestamp: ZonedDateTime) extends GameEvent
@@ -169,6 +171,8 @@ object GameSerializerRegistry extends JsonSerializerRegistry {
     JsonSerializer[GameStateChanged],
     // Replies
     JsonSerializer[GameReply],
-    JsonSerializer[OwnerReply]
+    JsonSerializer[OwnerReply],
+
+    JsonSerializer[StreamMessage]
   )
 }

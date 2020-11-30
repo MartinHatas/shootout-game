@@ -9,7 +9,7 @@ import akka.persistence.query.Offset
 import akka.stream.scaladsl.Source
 import akka.util.Timeout
 import com.lightbend.lagom.scaladsl.api.ServiceCall
-import com.lightbend.lagom.scaladsl.persistence.{EventStreamElement, PersistentEntityRegistry}
+import com.lightbend.lagom.scaladsl.persistence.PersistentEntityRegistry
 import com.lightbend.lagom.scaladsl.server.ServerServiceCall
 import io.hat.shootout.api._
 import io.hat.shootout.impl.auth.GameOwnerAuthorizer.isGameOwner
@@ -84,27 +84,17 @@ class GameServiceImpl(clusterSharding: ClusterSharding, persistentEntityRegistry
   /**
    * curl 'http://localhost:9000/api/game/${GAME_ID}/stream'
    */
-  override def gameStream(id: String): ServiceCall[NotUsed, Source[String, NotUsed]] = ServiceCall { _ =>
-    Future.successful(persistentEntityRegistry
-      .eventStream(GameEvent.Tag, Offset.noOffset)
-      .filter(event => event.entityId == id)
-      .map(event => convertEvent(event))
-      .filter(_.isDefined)
-      .map(_.get)
+  override def gameStream(id: String): ServiceCall[NotUsed, Source[StreamMessage, NotUsed]] = ServiceCall { _ =>
+    Future.successful(
+      persistentEntityRegistry
+      .eventStream(GameEvent.Tag.forEntityId(id), Offset.noOffset)
+      .map(streamElement => streamElement.event)
+      .collect {
+        case e: GameCreated       => StreamMessage(e.getClass.getSimpleName, data = Json.toJson(e))
+        case e: PlayerJoined      => StreamMessage(e.getClass.getSimpleName, data = Json.toJson(e))
+        case e: GameStateChanged  => StreamMessage(e.getClass.getSimpleName, data = Json.toJson(e))
+      }
     )
-  }
-
-
-  private def convertEvent(gameEvent: EventStreamElement[GameEvent]): Option[String] = {
-    val eventJson = gameEvent.event match {
-      case e: GameCreated => Some(Json.toJson(e))
-      case e: PlayerJoined => Some(Json.toJson(e))
-      case e: GameStateChanged => Some(Json.toJson(e))
-      case _ => None
-    }
-    eventJson
-      .map(event => Json.obj("type" -> gameEvent.event.getClass.getSimpleName, "data" -> event))
-      .map(_.toString())
   }
 
   /**
@@ -144,7 +134,5 @@ class GameServiceImpl(clusterSharding: ClusterSharding, persistentEntityRegistry
 
     Future.successful(RejectedMessage("Not implemented yet"))
   }
-
-
 
 }
